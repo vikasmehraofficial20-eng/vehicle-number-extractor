@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+uploads/*
+!uploads/.gitkeep
+outputs/*.xlsx
+outputs/reports_index.json
+.env
