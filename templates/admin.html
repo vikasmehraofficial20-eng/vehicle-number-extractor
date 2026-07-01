@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard &middot; Vehicle Number Extractor</title>
+<style>
+  :root {
+    --ink: #14213d;
+    --paper: #fbfaf7;
+    --accent: #b8552e;
+    --accent-deep: #8f3f1f;
+    --line: #dedad2;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  h1 { font-size: 24px; margin: 0; }
+  .sub { font-size: 13.5px; color: #5a5850; margin-top: 4px; }
+  a.logout {
+    font-size: 13.5px;
+    color: #5a5850;
+    text-decoration: underline;
+    white-space: nowrap;
+    padding-top: 6px;
+  }
+  .empty {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 40px 20px;
+    text-align: center;
+    color: #918d80;
+    font-size: 14.5px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  thead th {
+    background: #1f4e78;
+    color: #fff;
+    text-align: left;
+    padding: 12px 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+    vertical-align: middle;
+  }
+  tbody tr:hover { background: #faf6f0; }
+  .count-badge {
+    display: inline-block;
+    background: #eef2ea;
+    color: #2f6b3a;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 12.5px;
+  }
+  a.dl {
+    display: inline-block;
+    padding: 7px 14px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  a.dl:active { background: var(--accent-deep); }
+  .table-wrap { overflow-x: auto; border-radius: 14px; }
+  .video-name {
+    color: #918d80;
+    font-size: 12px;
+    display: block;
+    margin-top: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Audit Tool</div>
+      <h1>All Reports</h1>
+      <div class="sub">{{ reports|length }} report{{ 's' if reports|length != 1 else '' }} from all auditors, all cities</div>
+    </div>
+    <a class="logout" href="{{ url_for('admin_logout') }}">Log out</a>
+  </header>
+
+  {% if reports %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>City</th>
+          <th>Garage / Location</th>
+          <th>Auditor</th>
+          <th>Plates Found</th>
+          <th>Uploaded</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in reports %}
+        <tr>
+          <td>{{ r.date }}</td>
+          <td>{{ r.city }}</td>
+          <td>{{ r.garage }}</td>
+          <td>{{ r.auditor }}</td>
+          <td><span class="count-badge">{{ r.count }}</span></td>
+          <td>{{ r.created_at }}<span class="video-name">{{ r.video_name }}</span></td>
+          <td><a class="dl" href="{{ url_for('download', job_id=r.job_id) }}">Download</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">No reports yet. They'll show up here as soon as an auditor completes an upload.</div>
+  {% endif %}
+</div>
+</body>
+</html>

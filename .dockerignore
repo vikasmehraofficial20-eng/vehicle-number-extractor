@@ -1,6 +1,7 @@
-__pycache__
+__pycache__/
 *.pyc
 uploads/*
-outputs/*.xlsx
+outputs/*
+!uploads/.gitkeep
+!outputs/.gitkeep
 .git
-.env

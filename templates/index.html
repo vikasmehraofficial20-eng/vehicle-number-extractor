@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vehicle Number Extractor</title>
+<style>
+  :root {
+    --ink: #14213d;
+    --paper: #fbfaf7;
+    --accent: #b8552e;
+    --accent-deep: #8f3f1f;
+    --line: #dedad2;
+    --ok: #2f6b3a;
+    --err: #a3271f;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    padding: 28px 20px 40px;
+    display: flex;
+    flex-direction: column;
+  }
+  header { margin-bottom: 28px; }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  h1 {
+    font-size: 26px;
+    line-height: 1.15;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    font-size: 14.5px;
+    color: #5a5850;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+    margin-top: 22px;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #5a5850;
+    margin-bottom: 6px;
+  }
+  .text-field {
+    width: 100%;
+    padding: 12px 13px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--ink);
+    background: #fff;
+    margin-bottom: 16px;
+  }
+  .text-field:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  #dropzone {
+    border: 2px dashed var(--line);
+    border-radius: 12px;
+    padding: 34px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  #dropzone.drag { border-color: var(--accent); background: #fbf1ea; }
+  #dropzone svg { width: 34px; height: 34px; margin-bottom: 10px; color: var(--accent); }
+  #dropzone .cta { font-size: 15.5px; font-weight: 600; margin-bottom: 4px; }
+  #dropzone .hint { font-size: 13px; color: #837f74; }
+  input[type=file] { display: none; }
+
+  #filename {
+    display: none;
+    font-size: 14px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: #f4f2ec;
+    border-radius: 8px;
+    word-break: break-all;
+  }
+
+  button#uploadBtn {
+    width: 100%;
+    margin-top: 16px;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    display: none;
+  }
+  button#uploadBtn:active { background: var(--accent-deep); }
+  button#uploadBtn:disabled { opacity: 0.5; }
+
+  #status { margin-top: 20px; display: none; }
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14.5px;
+    margin-bottom: 12px;
+  }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .bar-track {
+    height: 8px;
+    background: #eeece5;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  .result {
+    display: none;
+    text-align: center;
+    padding: 8px 0 4px;
+  }
+  .result .count {
+    font-size: 34px;
+    font-weight: 700;
+    color: var(--ok);
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .result .count-label {
+    font-size: 13.5px;
+    color: #5a5850;
+    margin-bottom: 20px;
+  }
+  a#downloadBtn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    background: var(--ok);
+    color: #fff;
+    text-align: center;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 16px;
+  }
+  a#downloadBtn:active { opacity: 0.85; }
+
+  .error-box {
+    display: none;
+    background: #fbecea;
+    border: 1px solid #f0c7c1;
+    color: var(--err);
+    padding: 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-top: 20px;
+  }
+
+  .note {
+    font-size: 12.5px;
+    color: #918d80;
+    line-height: 1.5;
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  #restartBtn {
+    display: none;
+    width: 100%;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 14.5px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Audit Tool</div>
+    <h1>Vehicle Number Extractor</h1>
+    <p class="sub">Upload a video and get every vehicle number plate spotted in it, ready in an Excel sheet.</p>
+  </header>
+
+  <div class="card">
+    <label class="field-label" for="cityInput">City</label>
+    <input type="text" id="cityInput" class="text-field" placeholder="e.g. Mumbai" autocomplete="off">
+
+    <label class="field-label" for="garageInput">Garage / Location</label>
+    <input type="text" id="garageInput" class="text-field" placeholder="e.g. Andheri Service Center" autocomplete="off">
+
+    <label class="field-label" for="auditorInput">Auditor Name</label>
+    <input type="text" id="auditorInput" class="text-field" placeholder="e.g. Rajesh Kumar" autocomplete="off">
+
+    <label class="field-label" for="dateInput">Date</label>
+    <input type="date" id="dateInput" class="text-field" autocomplete="off">
+
+    <label class="field-label" style="margin-top: 18px;">Video</label>
+    <div id="dropzone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+      <div class="cta">Tap to select a video</div>
+      <div class="hint">or drag and drop &middot; MP4, MOV, AVI, MKV</div>
+    </div>
+    <input type="file" id="fileInput" accept="video/*">
+    <div id="filename"></div>
+    <button id="uploadBtn">Extract Vehicle Numbers</button>
+
+    <div class="error-box" id="formErrorBox"></div>
+
+    <div id="status">
+      <div class="status-line">
+        <div class="spinner"></div>
+        <span id="statusText">Uploading video&hellip;</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+    </div>
+
+    <div class="result" id="resultBox">
+      <div class="count" id="resultCount">0</div>
+      <div class="count-label" id="resultLabel">vehicle numbers found</div>
+      <a id="downloadBtn" href="#">Download Excel File</a>
+    </div>
+
+    <div class="error-box" id="errorBox"></div>
+    <button id="restartBtn">Process another video</button>
+  </div>
+
+  <p class="note">Processing happens on this device's connection — for a video shot on a phone, this typically takes anywhere from under a minute up to a few minutes depending on length. Keep this page open until it finishes.</p>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const filenameBox = document.getElementById('filename');
+const uploadBtn = document.getElementById('uploadBtn');
+const statusBox = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const barFill = document.getElementById('barFill');
+const resultBox = document.getElementById('resultBox');
+const resultCount = document.getElementById('resultCount');
+const resultLabel = document.getElementById('resultLabel');
+const downloadBtn = document.getElementById('downloadBtn');
+const errorBox = document.getElementById('errorBox');
+const formErrorBox = document.getElementById('formErrorBox');
+const restartBtn = document.getElementById('restartBtn');
+const cityInput = document.getElementById('cityInput');
+const garageInput = document.getElementById('garageInput');
+const auditorInput = document.getElementById('auditorInput');
+const dateInput = document.getElementById('dateInput');
+
+// Default date to today, editable if the audit is being logged for a different day
+dateInput.value = new Date().toISOString().split('T')[0];
+
+let selectedFile = null;
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) handleFile(fileInput.files[0]);
+});
+
+function handleFile(file) {
+  selectedFile = file;
+  filenameBox.style.display = 'block';
+  filenameBox.textContent = file.name + '  (' + (file.size / (1024*1024)).toFixed(1) + ' MB)';
+  uploadBtn.style.display = 'block';
+}
+
+uploadBtn.addEventListener('click', () => {
+  if (!selectedFile) return;
+
+  const city = cityInput.value.trim();
+  const garage = garageInput.value.trim();
+  const auditor = auditorInput.value.trim();
+  const date = dateInput.value.trim();
+  formErrorBox.style.display = 'none';
+  if (!city || !garage || !auditor || !date) {
+    formErrorBox.style.display = 'block';
+    formErrorBox.textContent = 'Please fill in City, Garage/Location, Auditor Name and Date before uploading.';
+    return;
+  }
+
+  uploadBtn.disabled = true;
+  uploadBtn.style.display = 'none';
+  dropzone.style.display = 'none';
+  filenameBox.style.display = 'none';
+  cityInput.disabled = true;
+  garageInput.disabled = true;
+  auditorInput.disabled = true;
+  dateInput.disabled = true;
+  statusBox.style.display = 'block';
+  statusText.textContent = 'Waking up the server (can take up to a minute if idle)…';
+  barFill.style.width = '3%';
+
+  const wakeTimer = setTimeout(() => {
+    statusText.textContent = 'Still waking up… almost there';
+  }, 8000);
+
+  const formData = new FormData();
+  formData.append('video', selectedFile);
+  formData.append('city', city);
+  formData.append('garage', garage);
+  formData.append('auditor', auditor);
+  formData.append('date', date);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/upload');
+  xhr.upload.onprogress = e => {
+    clearTimeout(wakeTimer);
+    if (e.lengthComputable) {
+      const pct = 3 + Math.round((e.loaded / e.total) * 27); // upload = first 30%
+      barFill.style.width = pct + '%';
+      statusText.textContent = 'Uploading video…';
+    }
+  };
+  xhr.onload = () => {
+    clearTimeout(wakeTimer);
+    if (xhr.status !== 200) {
+      showError(JSON.parse(xhr.responseText).error || 'Upload failed.');
+      return;
+    }
+    const data = JSON.parse(xhr.responseText);
+    statusText.textContent = 'Scanning frames for number plates…';
+    pollStatus(data.job_id);
+  };
+  xhr.onerror = () => {
+    clearTimeout(wakeTimer);
+    showError('Network error during upload. Check your connection and try again.');
+  };
+  xhr.send(formData);
+});
+
+function pollStatus(jobId) {
+  const interval = setInterval(() => {
+    fetch('/status/' + jobId)
+      .then(r => r.json())
+      .then(data => {
+        if (data.status === 'processing' || data.status === 'queued') {
+          const pct = 30 + Math.round((data.progress || 0) * 0.7);
+          barFill.style.width = pct + '%';
+        } else if (data.status === 'done') {
+          clearInterval(interval);
+          barFill.style.width = '100%';
+          setTimeout(() => showResult(jobId, data.count), 300);
+        } else if (data.status === 'error') {
+          clearInterval(interval);
+          showError(data.error || 'Something went wrong while processing the video.');
+        }
+      })
+      .catch(() => { clearInterval(interval); showError('Lost connection while processing.'); });
+  }, 1500);
+}
+
+function showResult(jobId, count) {
+  statusBox.style.display = 'none';
+  resultBox.style.display = 'block';
+  resultCount.textContent = count;
+  resultLabel.textContent = count === 1 ? 'vehicle number found' : 'vehicle numbers found';
+  downloadBtn.href = '/download/' + jobId;
+  restartBtn.style.display = 'block';
+}
+
+function showError(msg) {
+  statusBox.style.display = 'none';
+  errorBox.style.display = 'block';
+  errorBox.textContent = msg;
+  restartBtn.style.display = 'block';
+}
+
+restartBtn.addEventListener('click', () => window.location.reload());
+
+</script>
+</body>
+</html>
