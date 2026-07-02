@@ -7,7 +7,7 @@ import functools
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file, render_template, session, redirect, url_for
 
-from detector import process_video
+from detector import process_video, process_images
 from excel_export import build_excel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +17,8 @@ INDEX_FILE = os.path.join(OUTPUT_DIR, 'reports_index.json')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-ALLOWED_EXT = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp'}
+ALLOWED_VIDEO_EXT = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp'}
+ALLOWED_IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
 MAX_CONTENT_LENGTH = 150 * 1024 * 1024  # 150 MB (kept modest for free-tier 512MB RAM)
 
 # Set these in Render's Environment settings, not in code
@@ -61,6 +62,47 @@ def require_admin(view_func):
             return redirect(url_for('admin_login'))
         return view_func(*args, **kwargs)
     return wrapped
+
+
+def process_image_job(job_id, image_paths, original_name, city, garage, auditor, audit_date):
+    try:
+        JOBS[job_id]['status'] = 'processing'
+
+        def progress_cb(pct):
+            JOBS[job_id]['progress'] = pct
+
+        results = process_images(image_paths, progress_cb=progress_cb)
+
+        out_name = f'{job_id}.xlsx'
+        out_path = os.path.join(OUTPUT_DIR, out_name)
+        build_excel(results, original_name, out_path, city=city, garage=garage, auditor=auditor, audit_date=audit_date)
+
+        JOBS[job_id]['status'] = 'done'
+        JOBS[job_id]['progress'] = 100
+        JOBS[job_id]['result_file'] = out_name
+        JOBS[job_id]['count'] = len(results)
+
+        add_to_reports_index({
+            'job_id': job_id,
+            'result_file': out_name,
+            'video_name': original_name,
+            'city': city,
+            'garage': garage,
+            'auditor': auditor,
+            'date': audit_date,
+            'count': len(results),
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        })
+    except Exception as e:
+        traceback.print_exc()
+        JOBS[job_id]['status'] = 'error'
+        JOBS[job_id]['error'] = str(e)
+    finally:
+        for p in image_paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def process_job(job_id, video_path, original_name, city, garage, auditor, audit_date):
@@ -110,12 +152,6 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    if 'video' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
-    f = request.files['video']
-    if f.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-
     city = request.form.get('city', '').strip()
     garage = request.form.get('garage', '').strip()
     auditor = request.form.get('auditor', '').strip()
@@ -123,29 +159,53 @@ def upload():
     if not city or not garage or not auditor or not audit_date:
         return jsonify({'error': 'City, Garage/Location, Auditor Name and Date are required'}), 400
 
-    ext = os.path.splitext(f.filename)[1].lower()
-    if ext not in ALLOWED_EXT:
-        return jsonify({'error': f'Unsupported file type: {ext}. Please upload a video file.'}), 400
+    has_video = 'video' in request.files and request.files['video'].filename != ''
+    image_files = [f for f in request.files.getlist('images') if f.filename != '']
+
+    if not has_video and not image_files:
+        return jsonify({'error': 'No file uploaded'}), 400
 
     job_id = uuid.uuid4().hex
-    saved_path = os.path.join(UPLOAD_DIR, f'{job_id}{ext}')
-    f.save(saved_path)
 
-    JOBS[job_id] = {
-        'status': 'queued',
-        'progress': 0,
-        'error': None,
-        'result_file': None,
-        'video_name': f.filename,
-        'count': 0,
-    }
+    if has_video:
+        f = request.files['video']
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in ALLOWED_VIDEO_EXT:
+            return jsonify({'error': f'Unsupported video type: {ext}'}), 400
 
-    thread = threading.Thread(target=process_job,
-                               args=(job_id, saved_path, f.filename, city, garage, auditor, audit_date),
-                               daemon=True)
-    thread.start()
+        saved_path = os.path.join(UPLOAD_DIR, f'{job_id}{ext}')
+        f.save(saved_path)
 
-    return jsonify({'job_id': job_id})
+        JOBS[job_id] = {
+            'status': 'queued', 'progress': 0, 'error': None,
+            'result_file': None, 'video_name': f.filename, 'count': 0,
+        }
+        thread = threading.Thread(target=process_job,
+                                   args=(job_id, saved_path, f.filename, city, garage, auditor, audit_date),
+                                   daemon=True)
+        thread.start()
+        return jsonify({'job_id': job_id})
+
+    else:
+        saved_paths = []
+        for i, f in enumerate(image_files):
+            ext = os.path.splitext(f.filename)[1].lower()
+            if ext not in ALLOWED_IMAGE_EXT:
+                return jsonify({'error': f'Unsupported image type: {ext}'}), 400
+            saved_path = os.path.join(UPLOAD_DIR, f'{job_id}_{i}{ext}')
+            f.save(saved_path)
+            saved_paths.append(saved_path)
+
+        display_name = f'{len(saved_paths)} photos'
+        JOBS[job_id] = {
+            'status': 'queued', 'progress': 0, 'error': None,
+            'result_file': None, 'video_name': display_name, 'count': 0,
+        }
+        thread = threading.Thread(target=process_image_job,
+                                   args=(job_id, saved_paths, display_name, city, garage, auditor, audit_date),
+                                   daemon=True)
+        thread.start()
+        return jsonify({'job_id': job_id})
 
 
 @app.route('/status/<job_id>')
@@ -162,6 +222,7 @@ def status(job_id):
 
 
 @app.route('/download/<job_id>')
+@require_admin
 def download(job_id):
     job = JOBS.get(job_id)
     if job and job['status'] == 'done':
