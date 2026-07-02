@@ -14,7 +14,8 @@ TESS_CONFIG = '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 PLATE_RE = re.compile(r'^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{3,4}$')
 LOOSE_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{4,8}[0-9]{3,4}$')
 
-MAX_FRAME_WIDTH = 800  # downscale large phone-video frames to keep memory use low
+MAX_FRAME_WIDTH = 640      # smaller frame = fewer contours + faster OCR crops
+MAX_BOXES_PER_FRAME = 6    # only OCR the most plate-shaped candidates, not every contour
 
 
 def clean_text(raw):
@@ -44,6 +45,8 @@ def resize_if_needed(frame):
 
 
 def candidate_plate_regions(frame):
+    """Return the most plate-shaped candidate boxes, ranked and capped so
+    we don't waste OCR calls on every stray contour in a busy scene."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray_f = cv2.bilateralFilter(gray, 11, 17, 17)
     edged = cv2.Canny(gray_f, 30, 200)
@@ -51,10 +54,10 @@ def candidate_plate_regions(frame):
 
     contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     h_img, w_img = gray.shape
-    boxes = []
+    scored = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
-        if w < 40 or h < 12:
+        if w < 35 or h < 10:
             continue
         aspect = w / float(h)
         if not (1.5 <= aspect <= 7.0):
@@ -62,12 +65,17 @@ def candidate_plate_regions(frame):
         area_ratio = (w * h) / float(w_img * h_img)
         if area_ratio < 0.0005 or area_ratio > 0.30:
             continue
-        boxes.append((x, y, w, h))
+        # score: prefer aspect ratios closest to a typical plate (~3.5) and larger area
+        aspect_score = -abs(aspect - 3.5)
+        scored.append((aspect_score + area_ratio, (x, y, w, h)))
+
+    scored.sort(key=lambda s: s[0], reverse=True)
+    boxes = [b for _, b in scored[:MAX_BOXES_PER_FRAME]]
 
     cascade_path = cv2.data.haarcascades + 'haarcascade_russian_plate_number.xml'
     cascade = cv2.CascadeClassifier(cascade_path)
-    detected = cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(40, 12))
-    for (x, y, w, h) in detected:
+    detected = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(35, 10))
+    for (x, y, w, h) in list(detected)[:MAX_BOXES_PER_FRAME]:
         boxes.append((int(x), int(y), int(w), int(h)))
 
     return boxes
@@ -88,8 +96,8 @@ def dedupe_boxes(boxes, tol=15):
 
 def preprocess_for_ocr(crop):
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-    gray = cv2.bilateralFilter(gray, 9, 75, 75)
+    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    gray = cv2.bilateralFilter(gray, 7, 60, 60)
     gray = cv2.equalizeHist(gray)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     if np.mean(thresh) < 127:
@@ -146,11 +154,9 @@ def merge_readings(readings):
     return groups
 
 
-def process_video(video_path, sample_fps=2, progress_cb=None):
+def process_video(video_path, sample_fps=1, progress_cb=None):
     """Process video, return list of dicts with plate_number, confidence,
-    frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc.
-    sample_fps lowered to 1 by default to keep memory/CPU use manageable on
-    small instances; frames are also downscaled before analysis."""
+    frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError('Could not open video file')
