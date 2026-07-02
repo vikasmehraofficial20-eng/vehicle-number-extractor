@@ -261,9 +261,7 @@
     </div>
 
     <div class="result" id="resultBox">
-      <div class="count" id="resultCount">0</div>
-      <div class="count-label" id="resultLabel">vehicle numbers found</div>
-      <a id="downloadBtn" href="#">Download Excel File</a>
+      <div class="count-label" id="resultLabel" style="font-size: 17px; font-weight: 600; color: var(--ok);">Vehicle details successfully submitted</div>
     </div>
 
     <div class="error-box" id="errorBox"></div>
@@ -405,9 +403,6 @@ function pollStatus(jobId) {
 function showResult(jobId, count) {
   statusBox.style.display = 'none';
   resultBox.style.display = 'block';
-  resultCount.textContent = count;
-  resultLabel.textContent = count === 1 ? 'vehicle number found' : 'vehicle numbers found';
-  downloadBtn.href = '/download/' + jobId;
   restartBtn.style.display = 'block';
 }
 
