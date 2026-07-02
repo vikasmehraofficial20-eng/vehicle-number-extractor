@@ -11,12 +11,7 @@ from difflib import SequenceMatcher
 
 TESS_CONFIG = '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
-# Indian plate pattern, e.g. MH12AB1234, DL8CAF5678, KA01MJ1234
 PLATE_RE = re.compile(r'^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{3,4}$')
-
-# Loose shape check: 2 letters, then a run of alnum, ending in digits.
-# Used as a fallback when the strict format doesn't match due to OCR noise
-# (O/0, I/1, S/8, B/8 confusions are extremely common in plate OCR).
 LOOSE_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{4,8}[0-9]{3,4}$')
 
 
@@ -39,9 +34,6 @@ def is_plausible_plate(t):
 
 
 def candidate_plate_regions(frame):
-    """Return list of (x, y, w, h) candidate boxes likely to contain a plate,
-    combining edge/contour geometry with a Haar cascade pass so it generalizes
-    across plate styles, distances and angles from a handheld phone video."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray_f = cv2.bilateralFilter(gray, 11, 17, 17)
     edged = cv2.Canny(gray_f, 30, 200)
@@ -126,10 +118,6 @@ def similar(a, b):
 
 
 def merge_readings(readings):
-    """readings: list of (text, confidence, frame_idx, timestamp_sec).
-    Groups near-duplicate plate strings (OCR noise across frames of the
-    same car) and keeps the highest-confidence reading per group, along
-    with a count of how many frames supported it."""
     groups = []
     for text, conf, frame_idx, ts in readings:
         placed = False
@@ -149,8 +137,6 @@ def merge_readings(readings):
 
 
 def process_video(video_path, sample_fps=3, progress_cb=None):
-    """Process video, return list of dicts with plate_number, confidence,
-    frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError('Could not open video file')
@@ -161,17 +147,17 @@ def process_video(video_path, sample_fps=3, progress_cb=None):
 
     readings = []
     frame_idx = 0
-    while True:    
+    while True:
         ret, frame = cap.read()
         if not ret:
             break
-       if frame_idx % step == 0:        
-            ts = frame_idx / native_fps            
+        if frame_idx % step == 0:
+            ts = frame_idx / native_fps
             boxes = dedupe_boxes(candidate_plate_regions(frame))
-            print(f"[DEBUG] frame {frame_idx} ts={ts:.1f}s -> {len(boxes)} candidate boxes")
+            print("[DEBUG] frame " + str(frame_idx) + " ts=" + str(round(ts,1)) + "s -> " + str(len(boxes)) + " candidate boxes")
             for box in boxes:
                 for text, conf in ocr_region(frame, box):
-                    print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
+                    print("[DEBUG]   OCR raw='" + text + "' conf=" + str(round(conf,2)) + " plausible=" + str(is_plausible_plate(text)))
                     if is_plausible_plate(text) and conf >= 0.30:
                         readings.append((text, conf, frame_idx, ts))
             if progress_cb and total_frames:
