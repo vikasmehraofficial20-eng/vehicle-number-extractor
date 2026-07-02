@@ -203,27 +203,47 @@ def process_images(image_paths, progress_cb=None):
     """Process a list of still image file paths, return the same shape of
     result as process_video: list of dicts with plate_number, confidence,
     frames_detected (here: number of images it appeared in), first_seen_seconds
-    (here: index of the image it was first seen in, for reference)."""
+    (here: index of the image it was first seen in, for reference).
+    Each image is processed with its own error boundary and memory is
+    freed aggressively between images, since phone photos can be large
+    (10+ MB, 4000px+ wide) and a free-tier instance has limited RAM."""
+    import gc
+
     readings = []
     total = len(image_paths)
     for idx, path in enumerate(image_paths):
-        frame = cv2.imread(path)
-        if frame is None:
-            print(f"[DEBUG] image {idx} ({path}) failed to load (cv2.imread returned None)")
-            continue
-        h, w = frame.shape[:2]
-        print(f"[DEBUG] image {idx} ({path}) loaded, size={w}x{h}")
-        small_frame = resize_if_needed(frame)
-        boxes = dedupe_boxes(candidate_plate_regions(small_frame))
-        print(f"[DEBUG] image {idx} -> {len(boxes)} candidate boxes")
-        for box in boxes:
-            for text, conf in ocr_region(small_frame, box):
-                print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
-                if is_plausible_plate(text) and conf >= 0.25:
-                    readings.append((text, conf, idx, idx))
-        del frame
-        if progress_cb and total:
-            progress_cb(min(99, int(100 * (idx + 1) / total)))
+        try:
+            # Read at reduced size directly where possible to avoid holding
+            # a full-resolution decode in memory even briefly.
+            frame = cv2.imread(path, cv2.IMREAD_REDUCED_COLOR_2)
+            if frame is None:
+                frame = cv2.imread(path)
+            if frame is None:
+                print(f"[DEBUG] image {idx} failed to load")
+                continue
+
+            h, w = frame.shape[:2]
+            print(f"[DEBUG] image {idx} loaded, size={w}x{h}")
+
+            small_frame = resize_if_needed(frame)
+            del frame
+
+            boxes = dedupe_boxes(candidate_plate_regions(small_frame))
+            print(f"[DEBUG] image {idx} -> {len(boxes)} candidate boxes")
+
+            for box in boxes:
+                for text, conf in ocr_region(small_frame, box):
+                    print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
+                    if is_plausible_plate(text) and conf >= 0.25:
+                        readings.append((text, conf, idx, idx))
+
+            del small_frame
+        except Exception as e:
+            print(f"[DEBUG] image {idx} raised an error: {e}")
+        finally:
+            gc.collect()
+            if progress_cb and total:
+                progress_cb(min(99, int(100 * (idx + 1) / total)))
 
     groups = merge_readings(readings)
     groups.sort(key=lambda g: (-g['count'], -g['conf']))
