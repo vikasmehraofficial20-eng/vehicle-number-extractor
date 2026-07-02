@@ -14,6 +14,8 @@ TESS_CONFIG = '--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 PLATE_RE = re.compile(r'^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{3,4}$')
 LOOSE_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{4,8}[0-9]{3,4}$')
 
+MAX_FRAME_WIDTH = 800  # downscale large phone-video frames to keep memory use low
+
 
 def clean_text(raw):
     t = raw.upper()
@@ -33,6 +35,14 @@ def is_plausible_plate(t):
     return False
 
 
+def resize_if_needed(frame):
+    h, w = frame.shape[:2]
+    if w > MAX_FRAME_WIDTH:
+        scale = MAX_FRAME_WIDTH / float(w)
+        frame = cv2.resize(frame, (MAX_FRAME_WIDTH, int(h * scale)), interpolation=cv2.INTER_AREA)
+    return frame
+
+
 def candidate_plate_regions(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray_f = cv2.bilateralFilter(gray, 11, 17, 17)
@@ -44,19 +54,19 @@ def candidate_plate_regions(frame):
     boxes = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
-        if w < 50 or h < 15:
+        if w < 40 or h < 12:
             continue
         aspect = w / float(h)
-        if not (1.8 <= aspect <= 6.0):
+        if not (1.5 <= aspect <= 7.0):
             continue
         area_ratio = (w * h) / float(w_img * h_img)
-        if area_ratio < 0.001 or area_ratio > 0.25:
+        if area_ratio < 0.0005 or area_ratio > 0.30:
             continue
         boxes.append((x, y, w, h))
 
     cascade_path = cv2.data.haarcascades + 'haarcascade_russian_plate_number.xml'
     cascade = cv2.CascadeClassifier(cascade_path)
-    detected = cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(50, 15))
+    detected = cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(40, 12))
     for (x, y, w, h) in detected:
         boxes.append((int(x), int(y), int(w), int(h)))
 
@@ -136,7 +146,11 @@ def merge_readings(readings):
     return groups
 
 
-def process_video(video_path, sample_fps=3, progress_cb=None):
+def process_video(video_path, sample_fps=1, progress_cb=None):
+    """Process video, return list of dicts with plate_number, confidence,
+    frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc.
+    sample_fps lowered to 1 by default to keep memory/CPU use manageable on
+    small instances; frames are also downscaled before analysis."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError('Could not open video file')
@@ -153,16 +167,16 @@ def process_video(video_path, sample_fps=3, progress_cb=None):
             break
         if frame_idx % step == 0:
             ts = frame_idx / native_fps
-            boxes = dedupe_boxes(candidate_plate_regions(frame))
-            print("[DEBUG] frame " + str(frame_idx) + " ts=" + str(round(ts,1)) + "s -> " + str(len(boxes)) + " candidate boxes")
+            small_frame = resize_if_needed(frame)
+            boxes = dedupe_boxes(candidate_plate_regions(small_frame))
             for box in boxes:
-                for text, conf in ocr_region(frame, box):
-                    print("[DEBUG]   OCR raw='" + text + "' conf=" + str(round(conf,2)) + " plausible=" + str(is_plausible_plate(text)))
-                    if is_plausible_plate(text) and conf >= 0.30:
+                for text, conf in ocr_region(small_frame, box):
+                    if is_plausible_plate(text) and conf >= 0.25:
                         readings.append((text, conf, frame_idx, ts))
             if progress_cb and total_frames:
                 progress_cb(min(99, int(100 * frame_idx / total_frames)))
         frame_idx += 1
+        del frame
 
     cap.release()
     groups = merge_readings(readings)
