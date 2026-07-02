@@ -209,11 +209,16 @@ def process_images(image_paths, progress_cb=None):
     for idx, path in enumerate(image_paths):
         frame = cv2.imread(path)
         if frame is None:
+            print(f"[DEBUG] image {idx} ({path}) failed to load (cv2.imread returned None)")
             continue
+        h, w = frame.shape[:2]
+        print(f"[DEBUG] image {idx} ({path}) loaded, size={w}x{h}")
         small_frame = resize_if_needed(frame)
         boxes = dedupe_boxes(candidate_plate_regions(small_frame))
+        print(f"[DEBUG] image {idx} -> {len(boxes)} candidate boxes")
         for box in boxes:
             for text, conf in ocr_region(small_frame, box):
+                print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
                 if is_plausible_plate(text) and conf >= 0.25:
                     readings.append((text, conf, idx, idx))
         del frame
