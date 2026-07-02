@@ -27,6 +27,11 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 app.secret_key = SECRET_KEY
+from flask import send_from_directory
+
+@app.route('/LOGO.png')
+def serve_logo():
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), 'LOGO.png')
 
 # In-memory job store: job_id -> {status, progress, error, result_file, video_name}
 JOBS = {}
