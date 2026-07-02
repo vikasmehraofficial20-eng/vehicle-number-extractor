@@ -146,7 +146,7 @@ def merge_readings(readings):
     return groups
 
 
-def process_video(video_path, sample_fps=1, progress_cb=None):
+def process_video(video_path, sample_fps=2, progress_cb=None):
     """Process video, return list of dicts with plate_number, confidence,
     frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc.
     sample_fps lowered to 1 by default to keep memory/CPU use manageable on
