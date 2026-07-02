@@ -218,6 +218,20 @@ def ocr_full_image_fallback(frame):
     return out
 
 
+def should_accept(text, conf):
+    """Decide whether an OCR reading should be kept. A strict plate-pattern
+    match (PLATE_RE) is trusted even at low/zero OCR confidence, since
+    Tesseract sometimes reports conf=0.00 for a perfectly correct read
+    (e.g. -1/0 per-character confidences averaging out to 0). A looser
+    pattern match (LOOSE_RE) still requires some minimum confidence to
+    avoid accepting false positives."""
+    if PLATE_RE.match(text):
+        return True
+    if LOOSE_RE.match(text):
+        return conf >= 0.15
+    return False
+
+
 def similar(a, b):
     return SequenceMatcher(None, a, b).ratio()
 
@@ -264,7 +278,7 @@ def process_video(video_path, sample_fps=1, progress_cb=None):
             boxes = dedupe_boxes(candidate_plate_regions(small_frame))
             for box in boxes:
                 for text, conf in ocr_region(small_frame, box):
-                    if is_plausible_plate(text) and conf >= 0.25:
+                    if is_plausible_plate(text) and should_accept(text, conf):
                         readings.append((text, conf, frame_idx, ts))
             if progress_cb and total_frames:
                 progress_cb(min(99, int(100 * frame_idx / total_frames)))
@@ -335,7 +349,7 @@ def process_images(image_paths, progress_cb=None):
             for box in boxes:
                 for text, conf in ocr_region(small_frame, box):
                     print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
-                    if is_plausible_plate(text) and conf >= 0.25:
+                    if is_plausible_plate(text) and should_accept(text, conf):
                         readings.append((text, conf, idx, idx))
                         found_plausible = True
 
@@ -345,7 +359,7 @@ def process_images(image_paths, progress_cb=None):
                 fallback_hits = ocr_full_image_fallback(small_frame)
                 for text, conf in fallback_hits:
                     print(f"[DEBUG]   FALLBACK raw='{text}' conf={conf:.2f}")
-                    if conf >= 0.20:
+                    if should_accept(text, conf):
                         readings.append((text, conf, idx, idx))
 
             del small_frame
