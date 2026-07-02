@@ -199,7 +199,7 @@ def process_video(video_path, sample_fps=1, progress_cb=None):
     return result
 
 
-MAX_IMAGE_WIDTH = 1600     # images are far fewer than video frames, so we can afford much higher detail
+MAX_IMAGE_WIDTH = 1000     # balance between plate detail and free-tier memory limits
 
 
 def resize_image_if_needed(frame):
