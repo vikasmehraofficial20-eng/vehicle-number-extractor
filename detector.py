@@ -15,7 +15,7 @@ PLATE_RE = re.compile(r'^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{3,4}$')
 LOOSE_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{4,8}[0-9]{3,4}$')
 
 MAX_FRAME_WIDTH = 640      # smaller frame = fewer contours + faster OCR crops
-MAX_BOXES_PER_FRAME = 6    # only OCR the most plate-shaped candidates, not every contour
+MAX_BOXES_PER_FRAME = 10   # only OCR the most plate-shaped candidates, not every contour
 
 
 def clean_text(raw):
@@ -154,7 +154,7 @@ def merge_readings(readings):
     return groups
 
 
-def process_video(video_path, sample_fps=1, progress_cb=None):
+def process_video(video_path, sample_fps=2, progress_cb=None):
     """Process video, return list of dicts with plate_number, confidence,
     frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc."""
     cap = cv2.VideoCapture(video_path)
