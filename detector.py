@@ -199,6 +199,17 @@ def process_video(video_path, sample_fps=1, progress_cb=None):
     return result
 
 
+MAX_IMAGE_WIDTH = 1600     # images are far fewer than video frames, so we can afford much higher detail
+
+
+def resize_image_if_needed(frame):
+    h, w = frame.shape[:2]
+    if w > MAX_IMAGE_WIDTH:
+        scale = MAX_IMAGE_WIDTH / float(w)
+        frame = cv2.resize(frame, (MAX_IMAGE_WIDTH, int(h * scale)), interpolation=cv2.INTER_AREA)
+    return frame
+
+
 def process_images(image_paths, progress_cb=None):
     """Process a list of still image file paths, return the same shape of
     result as process_video: list of dicts with plate_number, confidence,
@@ -206,18 +217,17 @@ def process_images(image_paths, progress_cb=None):
     (here: index of the image it was first seen in, for reference).
     Each image is processed with its own error boundary and memory is
     freed aggressively between images, since phone photos can be large
-    (10+ MB, 4000px+ wide) and a free-tier instance has limited RAM."""
+    (10+ MB, 4000px+ wide) and a free-tier instance has limited RAM.
+    Images are kept at higher resolution than video frames (see
+    MAX_IMAGE_WIDTH) since there are far fewer of them to process, and
+    plate detail matters more when there's no averaging across many frames."""
     import gc
 
     readings = []
     total = len(image_paths)
     for idx, path in enumerate(image_paths):
         try:
-            # Read at reduced size directly where possible to avoid holding
-            # a full-resolution decode in memory even briefly.
-            frame = cv2.imread(path, cv2.IMREAD_REDUCED_COLOR_2)
-            if frame is None:
-                frame = cv2.imread(path)
+            frame = cv2.imread(path)
             if frame is None:
                 print(f"[DEBUG] image {idx} failed to load")
                 continue
@@ -225,8 +235,11 @@ def process_images(image_paths, progress_cb=None):
             h, w = frame.shape[:2]
             print(f"[DEBUG] image {idx} loaded, size={w}x{h}")
 
-            small_frame = resize_if_needed(frame)
+            small_frame = resize_image_if_needed(frame)
             del frame
+
+            rh, rw = small_frame.shape[:2]
+            print(f"[DEBUG] image {idx} resized to {rw}x{rh}")
 
             boxes = dedupe_boxes(candidate_plate_regions(small_frame))
             print(f"[DEBUG] image {idx} -> {len(boxes)} candidate boxes")
