@@ -161,12 +161,12 @@ def process_video(video_path, sample_fps=3, progress_cb=None):
 
     readings = []
     frame_idx = 0
-    while True:
+    while True:    
         ret, frame = cap.read()
         if not ret:
             break
-       if frame_idx % step == 0:
-            ts = frame_idx / native_fps
+       if frame_idx % step == 0:        
+            ts = frame_idx / native_fps            
             boxes = dedupe_boxes(candidate_plate_regions(frame))
             print(f"[DEBUG] frame {frame_idx} ts={ts:.1f}s -> {len(boxes)} candidate boxes")
             for box in boxes:
