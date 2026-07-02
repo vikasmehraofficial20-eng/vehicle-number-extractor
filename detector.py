@@ -1,7 +1,8 @@
 """
-ANPR core: extract frames from a video, find likely license-plate regions,
-OCR them with Tesseract, clean/validate the text, and deduplicate readings
-across frames into a final list of unique plate numbers.
+ANPR core: extract frames from a video (or take still images), find likely
+license-plate regions, OCR them with Tesseract, clean/validate the text,
+and deduplicate readings across frames/images into a final list of unique
+plate numbers.
 """
 import cv2
 import re
@@ -46,7 +47,8 @@ def resize_if_needed(frame):
 
 def candidate_plate_regions(frame):
     """Return the most plate-shaped candidate boxes, ranked and capped so
-    we don't waste OCR calls on every stray contour in a busy scene."""
+    we don't waste OCR calls on every stray contour in a busy scene.
+    Tuned for VIDEO frames (wide shots, many frames to average across)."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray_f = cv2.bilateralFilter(gray, 11, 17, 17)
     edged = cv2.Canny(gray_f, 30, 200)
@@ -77,6 +79,61 @@ def candidate_plate_regions(frame):
     detected = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(35, 10))
     for (x, y, w, h) in list(detected)[:MAX_BOXES_PER_FRAME]:
         boxes.append((int(x), int(y), int(w), int(h)))
+
+    return boxes
+
+
+# ---------------------------------------------------------------------------
+# Image-specific detection (still photos)
+#
+# Still photos taken during an audit are often shot much closer than video,
+# so the plate can occupy a large fraction of the frame. The video detector's
+# area_ratio cap (0.30) and low box cap (6) silently reject the real plate
+# box in that case, leaving only junk contours (badges, reflections, etc.)
+# for OCR. These image-specific settings relax both constraints and add a
+# whole-image fallback pass as a safety net.
+# ---------------------------------------------------------------------------
+
+MAX_BOXES_PER_IMAGE = 15
+MAX_AREA_RATIO_IMAGE = 0.65   # allow close-up plate shots that fill most of the frame
+
+
+def candidate_plate_regions_image(frame):
+    """Same approach as candidate_plate_regions, but relaxed for close-up
+    still photos: bigger area cap, more candidate boxes kept, and the
+    cascade is run at two scale factors to catch plates at different
+    distances/sizes within a single shot."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray_f = cv2.bilateralFilter(gray, 11, 17, 17)
+    edged = cv2.Canny(gray_f, 30, 200)
+    edged = cv2.dilate(edged, np.ones((3, 3), np.uint8), iterations=1)
+
+    contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    h_img, w_img = gray.shape
+    scored = []
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+        if w < 35 or h < 10:
+            continue
+        aspect = w / float(h)
+        if not (1.5 <= aspect <= 7.0):
+            continue
+        area_ratio = (w * h) / float(w_img * h_img)
+        if area_ratio < 0.0005 or area_ratio > MAX_AREA_RATIO_IMAGE:
+            continue
+        aspect_score = -abs(aspect - 3.5)
+        scored.append((aspect_score + area_ratio, (x, y, w, h)))
+
+    scored.sort(key=lambda s: s[0], reverse=True)
+    boxes = [b for _, b in scored[:MAX_BOXES_PER_IMAGE]]
+
+    cascade_path = cv2.data.haarcascades + 'haarcascade_russian_plate_number.xml'
+    cascade = cv2.CascadeClassifier(cascade_path)
+    for scale_factor, min_neighbors in [(1.05, 3), (1.1, 4)]:
+        detected = cascade.detectMultiScale(gray, scaleFactor=scale_factor,
+                                             minNeighbors=min_neighbors, minSize=(35, 10))
+        for (x, y, w, h) in detected:
+            boxes.append((int(x), int(y), int(w), int(h)))
 
     return boxes
 
@@ -128,6 +185,36 @@ def ocr_region(frame, box, pad=6):
     if line_text.strip():
         avg_conf = (sum(confs) / len(confs) / 100.0) if confs else 0.5
         out.append((clean_text(line_text), avg_conf))
+    return out
+
+
+def ocr_full_image_fallback(frame):
+    """Last resort for still images: OCR the whole frame with a
+    layout-aware PSM and pull out any word-level token that matches a
+    plausible plate pattern. Used only when box-based detection found
+    nothing usable, to catch plates whose box got filtered out entirely
+    (odd angle, glare, unusual contour)."""
+    processed = preprocess_for_ocr(frame)
+    config = '--psm 11 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    try:
+        data = pytesseract.image_to_data(processed, config=config,
+                                          output_type=pytesseract.Output.DICT)
+    except pytesseract.TesseractError:
+        return []
+
+    out = []
+    n = len(data.get('text', []))
+    for i in range(n):
+        raw = data['text'][i]
+        if not raw:
+            continue
+        text = clean_text(raw)
+        conf_raw = data['conf'][i]
+        if conf_raw in ('-1', -1):
+            continue
+        conf = float(conf_raw) / 100.0
+        if is_plausible_plate(text):
+            out.append((text, conf))
     return out
 
 
@@ -241,13 +328,24 @@ def process_images(image_paths, progress_cb=None):
             rh, rw = small_frame.shape[:2]
             print(f"[DEBUG] image {idx} resized to {rw}x{rh}")
 
-            boxes = dedupe_boxes(candidate_plate_regions(small_frame))
+            boxes = dedupe_boxes(candidate_plate_regions_image(small_frame))
             print(f"[DEBUG] image {idx} -> {len(boxes)} candidate boxes")
 
+            found_plausible = False
             for box in boxes:
                 for text, conf in ocr_region(small_frame, box):
                     print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
                     if is_plausible_plate(text) and conf >= 0.25:
+                        readings.append((text, conf, idx, idx))
+                        found_plausible = True
+
+            # Fallback only if box-based detection found nothing usable —
+            # catches plates whose box got filtered out entirely.
+            if not found_plausible:
+                fallback_hits = ocr_full_image_fallback(small_frame)
+                for text, conf in fallback_hits:
+                    print(f"[DEBUG]   FALLBACK raw='{text}' conf={conf:.2f}")
+                    if conf >= 0.20:
                         readings.append((text, conf, idx, idx))
 
             del small_frame
