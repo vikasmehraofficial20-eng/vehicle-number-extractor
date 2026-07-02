@@ -165,11 +165,13 @@ def process_video(video_path, sample_fps=3, progress_cb=None):
         ret, frame = cap.read()
         if not ret:
             break
-        if frame_idx % step == 0:
+       if frame_idx % step == 0:
             ts = frame_idx / native_fps
             boxes = dedupe_boxes(candidate_plate_regions(frame))
+            print(f"[DEBUG] frame {frame_idx} ts={ts:.1f}s -> {len(boxes)} candidate boxes")
             for box in boxes:
                 for text, conf in ocr_region(frame, box):
+                    print(f"[DEBUG]   OCR raw='{text}' conf={conf:.2f} plausible={is_plausible_plate(text)}")
                     if is_plausible_plate(text) and conf >= 0.30:
                         readings.append((text, conf, frame_idx, ts))
             if progress_cb and total_frames:
