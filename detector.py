@@ -15,7 +15,7 @@ PLATE_RE = re.compile(r'^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{3,4}$')
 LOOSE_RE = re.compile(r'^[A-Z]{2}[A-Z0-9]{4,8}[0-9]{3,4}$')
 
 MAX_FRAME_WIDTH = 640      # smaller frame = fewer contours + faster OCR crops
-MAX_BOXES_PER_FRAME = 10   # only OCR the most plate-shaped candidates, not every contour
+MAX_BOXES_PER_FRAME = 6    # only OCR the most plate-shaped candidates, not every contour
 
 
 def clean_text(raw):
@@ -154,7 +154,7 @@ def merge_readings(readings):
     return groups
 
 
-def process_video(video_path, sample_fps=2, progress_cb=None):
+def process_video(video_path, sample_fps=1, progress_cb=None):
     """Process video, return list of dicts with plate_number, confidence,
     frames_detected, first_seen_seconds — sorted by frames_detected/confidence desc."""
     cap = cv2.VideoCapture(video_path)
@@ -195,5 +195,40 @@ def process_video(video_path, sample_fps=2, progress_cb=None):
             'confidence': round(g['conf'] * 100, 1),
             'frames_detected': g['count'],
             'first_seen_seconds': round(g['first_ts'], 1),
+        })
+    return result
+
+
+def process_images(image_paths, progress_cb=None):
+    """Process a list of still image file paths, return the same shape of
+    result as process_video: list of dicts with plate_number, confidence,
+    frames_detected (here: number of images it appeared in), first_seen_seconds
+    (here: index of the image it was first seen in, for reference)."""
+    readings = []
+    total = len(image_paths)
+    for idx, path in enumerate(image_paths):
+        frame = cv2.imread(path)
+        if frame is None:
+            continue
+        small_frame = resize_if_needed(frame)
+        boxes = dedupe_boxes(candidate_plate_regions(small_frame))
+        for box in boxes:
+            for text, conf in ocr_region(small_frame, box):
+                if is_plausible_plate(text) and conf >= 0.25:
+                    readings.append((text, conf, idx, idx))
+        del frame
+        if progress_cb and total:
+            progress_cb(min(99, int(100 * (idx + 1) / total)))
+
+    groups = merge_readings(readings)
+    groups.sort(key=lambda g: (-g['count'], -g['conf']))
+
+    result = []
+    for g in groups:
+        result.append({
+            'plate_number': g['text'],
+            'confidence': round(g['conf'] * 100, 1),
+            'frames_detected': g['count'],
+            'first_seen_seconds': g['first_ts'],
         })
     return result
