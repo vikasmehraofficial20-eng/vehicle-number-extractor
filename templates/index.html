@@ -83,6 +83,31 @@
     border-color: var(--accent);
   }
 
+  .mode-toggle {
+    display: flex;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  .mode-btn {
+    flex: 1;
+    padding: 11px 10px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    border: none;
+    border-right: 1px solid var(--line);
+  }
+  .mode-btn:last-child { border-right: none; }
+  .mode-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
   #dropzone {
     border: 2px dashed var(--line);
     border-radius: 12px;
@@ -159,31 +184,11 @@
     text-align: center;
     padding: 8px 0 4px;
   }
-  .result .count {
-    font-size: 34px;
-    font-weight: 700;
-    color: var(--ok);
-    line-height: 1;
-    margin-bottom: 6px;
-  }
   .result .count-label {
     font-size: 13.5px;
     color: #5a5850;
     margin-bottom: 20px;
   }
-  a#downloadBtn {
-    display: block;
-    width: 100%;
-    padding: 14px;
-    border-radius: 10px;
-    background: var(--ok);
-    color: #fff;
-    text-align: center;
-    font-weight: 600;
-    text-decoration: none;
-    font-size: 16px;
-  }
-  a#downloadBtn:active { opacity: 0.85; }
 
   .error-box {
     display: none;
@@ -224,7 +229,7 @@
   <header>
     <div class="eyebrow">GoMechanic Audit Tool</div>
     <h1>Vehicle Number Extractor</h1>
-    <p class="sub">Upload a video and get every vehicle number plate spotted in it, ready in an Excel sheet.</p>
+    <p class="sub">Upload a video, or several photos, and get every vehicle number plate spotted, saved for the admin to review.</p>
   </header>
 
   <div class="card">
@@ -240,13 +245,18 @@
     <label class="field-label" for="dateInput">Date</label>
     <input type="date" id="dateInput" class="text-field" autocomplete="off">
 
-    <label class="field-label" style="margin-top: 18px;">Video</label>
+    <label class="field-label" style="margin-top: 18px;">Upload Type</label>
+    <div class="mode-toggle">
+      <button type="button" class="mode-btn active" id="modeImagesBtn">Photos</button>
+      <button type="button" class="mode-btn" id="modeVideoBtn">Video</button>
+    </div>
+
     <div id="dropzone">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-      <div class="cta">Tap to select a video</div>
-      <div class="hint">or drag and drop &middot; MP4, MOV, AVI, MKV</div>
+      <div class="cta" id="dropzoneCta">Tap to select photos</div>
+      <div class="hint" id="dropzoneHint">or drag and drop &middot; JPG, PNG &middot; select multiple</div>
     </div>
-    <input type="file" id="fileInput" accept="video/*">
+    <input type="file" id="fileInput" accept="image/*" multiple>
     <div id="filename"></div>
     <button id="uploadBtn">Extract Vehicle Numbers</button>
 
@@ -255,7 +265,7 @@
     <div id="status">
       <div class="status-line">
         <div class="spinner"></div>
-        <span id="statusText">Uploading video&hellip;</span>
+        <span id="statusText">Uploading&hellip;</span>
       </div>
       <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
     </div>
@@ -268,11 +278,13 @@
     <button id="restartBtn">Process another video</button>
   </div>
 
-  <p class="note">Processing happens on this device's connection — for a video shot on a phone, this typically takes anywhere from under a minute up to a few minutes depending on length. Keep this page open until it finishes.</p>
+  <p class="note">Processing happens on this device's connection — for photos this is usually quick; for a video shot on a phone it can take anywhere from under a minute up to a few minutes depending on length. Keep this page open until it finishes.</p>
 </div>
 
 <script>
 const dropzone = document.getElementById('dropzone');
+const dropzoneCta = document.getElementById('dropzoneCta');
+const dropzoneHint = document.getElementById('dropzoneHint');
 const fileInput = document.getElementById('fileInput');
 const filenameBox = document.getElementById('filename');
 const uploadBtn = document.getElementById('uploadBtn');
@@ -280,9 +292,7 @@ const statusBox = document.getElementById('status');
 const statusText = document.getElementById('statusText');
 const barFill = document.getElementById('barFill');
 const resultBox = document.getElementById('resultBox');
-const resultCount = document.getElementById('resultCount');
 const resultLabel = document.getElementById('resultLabel');
-const downloadBtn = document.getElementById('downloadBtn');
 const errorBox = document.getElementById('errorBox');
 const formErrorBox = document.getElementById('formErrorBox');
 const restartBtn = document.getElementById('restartBtn');
@@ -290,11 +300,39 @@ const cityInput = document.getElementById('cityInput');
 const garageInput = document.getElementById('garageInput');
 const auditorInput = document.getElementById('auditorInput');
 const dateInput = document.getElementById('dateInput');
+const modeImagesBtn = document.getElementById('modeImagesBtn');
+const modeVideoBtn = document.getElementById('modeVideoBtn');
 
-// Default date to today, editable if the audit is being logged for a different day
 dateInput.value = new Date().toISOString().split('T')[0];
 
-let selectedFile = null;
+let uploadMode = 'images'; // 'images' or 'video'
+let selectedFiles = [];
+
+function setMode(mode) {
+  uploadMode = mode;
+  selectedFiles = [];
+  filenameBox.style.display = 'none';
+  uploadBtn.style.display = 'none';
+
+  if (mode === 'images') {
+    modeImagesBtn.classList.add('active');
+    modeVideoBtn.classList.remove('active');
+    fileInput.setAttribute('accept', 'image/*');
+    fileInput.setAttribute('multiple', 'multiple');
+    dropzoneCta.textContent = 'Tap to select photos';
+    dropzoneHint.textContent = 'or drag and drop \u00B7 JPG, PNG \u00B7 select multiple';
+  } else {
+    modeVideoBtn.classList.add('active');
+    modeImagesBtn.classList.remove('active');
+    fileInput.setAttribute('accept', 'video/*');
+    fileInput.removeAttribute('multiple');
+    dropzoneCta.textContent = 'Tap to select a video';
+    dropzoneHint.textContent = 'or drag and drop \u00B7 MP4, MOV, AVI, MKV';
+  }
+}
+
+modeImagesBtn.addEventListener('click', () => setMode('images'));
+modeVideoBtn.addEventListener('click', () => setMode('video'));
 
 dropzone.addEventListener('click', () => fileInput.click());
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
@@ -302,21 +340,26 @@ dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
 dropzone.addEventListener('drop', e => {
   e.preventDefault();
   dropzone.classList.remove('drag');
-  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
 });
 fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) handleFile(fileInput.files[0]);
+  if (fileInput.files.length) handleFiles(fileInput.files);
 });
 
-function handleFile(file) {
-  selectedFile = file;
+function handleFiles(fileList) {
+  selectedFiles = Array.from(fileList);
   filenameBox.style.display = 'block';
-  filenameBox.textContent = file.name + '  (' + (file.size / (1024*1024)).toFixed(1) + ' MB)';
+  if (uploadMode === 'images') {
+    filenameBox.textContent = selectedFiles.length + ' photo' + (selectedFiles.length === 1 ? '' : 's') + ' selected';
+  } else {
+    const f = selectedFiles[0];
+    filenameBox.textContent = f.name + '  (' + (f.size / (1024*1024)).toFixed(1) + ' MB)';
+  }
   uploadBtn.style.display = 'block';
 }
 
 uploadBtn.addEventListener('click', () => {
-  if (!selectedFile) return;
+  if (!selectedFiles.length) return;
 
   const city = cityInput.value.trim();
   const garage = garageInput.value.trim();
@@ -337,16 +380,22 @@ uploadBtn.addEventListener('click', () => {
   garageInput.disabled = true;
   auditorInput.disabled = true;
   dateInput.disabled = true;
+  modeImagesBtn.disabled = true;
+  modeVideoBtn.disabled = true;
   statusBox.style.display = 'block';
-  statusText.textContent = 'Waking up the server (can take up to a minute if idle)…';
+  statusText.textContent = 'Waking up the server (can take up to a minute if idle)\u2026';
   barFill.style.width = '3%';
 
   const wakeTimer = setTimeout(() => {
-    statusText.textContent = 'Still waking up… almost there';
+    statusText.textContent = 'Still waking up\u2026 almost there';
   }, 8000);
 
   const formData = new FormData();
-  formData.append('video', selectedFile);
+  if (uploadMode === 'video') {
+    formData.append('video', selectedFiles[0]);
+  } else {
+    selectedFiles.forEach(f => formData.append('images', f));
+  }
   formData.append('city', city);
   formData.append('garage', garage);
   formData.append('auditor', auditor);
@@ -359,7 +408,7 @@ uploadBtn.addEventListener('click', () => {
     if (e.lengthComputable) {
       const pct = 3 + Math.round((e.loaded / e.total) * 27); // upload = first 30%
       barFill.style.width = pct + '%';
-      statusText.textContent = 'Uploading video…';
+      statusText.textContent = 'Uploading\u2026';
     }
   };
   xhr.onload = () => {
@@ -369,7 +418,7 @@ uploadBtn.addEventListener('click', () => {
       return;
     }
     const data = JSON.parse(xhr.responseText);
-    statusText.textContent = 'Scanning frames for number plates…';
+    statusText.textContent = 'Scanning for number plates\u2026';
     pollStatus(data.job_id);
   };
   xhr.onerror = () => {
@@ -390,17 +439,17 @@ function pollStatus(jobId) {
         } else if (data.status === 'done') {
           clearInterval(interval);
           barFill.style.width = '100%';
-          setTimeout(() => showResult(jobId, data.count), 300);
+          setTimeout(() => showResult(), 300);
         } else if (data.status === 'error') {
           clearInterval(interval);
-          showError(data.error || 'Something went wrong while processing the video.');
+          showError(data.error || 'Something went wrong while processing.');
         }
       })
       .catch(() => { clearInterval(interval); showError('Lost connection while processing.'); });
   }, 1500);
 }
 
-function showResult(jobId, count) {
+function showResult() {
   statusBox.style.display = 'none';
   resultBox.style.display = 'block';
   restartBtn.style.display = 'block';
