@@ -83,6 +83,17 @@ def append_results(results, job_id, city, garage, auditor, audit_date, source_na
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
         rows = []
         for r in results:
+            # Prefer a clickable link to the actual uploaded file on Drive;
+            # fall back to plain filename text if no link is available
+            # (e.g. GOOGLE_DRIVE_FOLDER_ID not configured, or the upload
+            # failed — never blocks the row from being logged).
+            name = r.get('source_file', source_name)
+            link = r.get('source_link')
+            if link:
+                safe_name = name.replace('"', "'")
+                row_source = f'=HYPERLINK("{link}","{safe_name}")'
+            else:
+                row_source = name
             rows.append([
                 now,
                 job_id,
@@ -94,7 +105,7 @@ def append_results(results, job_id, city, garage, auditor, audit_date, source_na
                 r['confidence'],
                 r['frames_detected'],
                 r['first_seen_seconds'],
-                source_name,
+                row_source,
             ])
         try:
             ws.append_rows(rows, value_input_option='USER_ENTERED')
