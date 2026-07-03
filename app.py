@@ -9,6 +9,7 @@ from flask import Flask, request, jsonify, send_file, render_template, session, 
 
 from detector import process_video, process_images
 from excel_export import build_excel
+from google_sheets import append_results
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
@@ -77,6 +78,15 @@ def process_image_job(job_id, image_paths, original_name, city, garage, auditor,
         out_path = os.path.join(OUTPUT_DIR, out_name)
         build_excel(results, original_name, out_path, city=city, garage=garage, auditor=auditor, audit_date=audit_date)
 
+        # Persist every detected vehicle to the master Google Sheet so it
+        # survives Render restarts and accumulates across all audits.
+        # Failures here are logged inside append_results and never raise,
+        # so a Sheets outage can't block the report the user is waiting on.
+        try:
+            append_results(results, job_id, city, garage, auditor, audit_date, original_name)
+        except Exception:
+            traceback.print_exc()
+
         JOBS[job_id]['status'] = 'done'
         JOBS[job_id]['progress'] = 100
         JOBS[job_id]['result_file'] = out_name
@@ -117,6 +127,13 @@ def process_job(job_id, video_path, original_name, city, garage, auditor, audit_
         out_name = f'{job_id}.xlsx'
         out_path = os.path.join(OUTPUT_DIR, out_name)
         build_excel(results, original_name, out_path, city=city, garage=garage, auditor=auditor, audit_date=audit_date)
+
+        # Persist every detected vehicle to the master Google Sheet so it
+        # survives Render restarts and accumulates across all audits.
+        try:
+            append_results(results, job_id, city, garage, auditor, audit_date, original_name)
+        except Exception:
+            traceback.print_exc()
 
         JOBS[job_id]['status'] = 'done'
         JOBS[job_id]['progress'] = 100
@@ -262,7 +279,10 @@ def admin_logout():
 @require_admin
 def admin_dashboard():
     reports = load_reports_index()
-    return render_template('admin.html', reports=reports)
+    master_sheet_id = os.environ.get('GOOGLE_SHEET_ID', '')
+    master_sheet_url = (f'https://docs.google.com/spreadsheets/d/{master_sheet_id}/edit'
+                         if master_sheet_id else None)
+    return render_template('admin.html', reports=reports, master_sheet_url=master_sheet_url)
 
 
 if __name__ == '__main__':
