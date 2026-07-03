@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, send_file, render_template, session, 
 from detector import process_video, process_images
 from excel_export import build_excel
 from google_sheets import append_results
+from google_drive import upload_file
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
@@ -65,7 +66,7 @@ def require_admin(view_func):
     return wrapped
 
 
-def process_image_job(job_id, image_paths, original_name, city, garage, auditor, audit_date):
+def process_image_job(job_id, image_paths, original_filenames, original_name, city, garage, auditor, audit_date):
     try:
         JOBS[job_id]['status'] = 'processing'
 
@@ -73,6 +74,30 @@ def process_image_job(job_id, image_paths, original_name, city, garage, auditor,
             JOBS[job_id]['progress'] = pct
 
         results = process_images(image_paths, progress_cb=progress_cb)
+
+        # Attach the actual uploaded filename each plate was first seen in
+        # (process_images stores the image index in 'first_seen_seconds' for
+        # image jobs), so the Google Sheet shows a real filename instead of
+        # a generic "N photos" label.
+        for r in results:
+            idx = r.get('first_seen_seconds')
+            if isinstance(idx, int) and 0 <= idx < len(original_filenames):
+                r['source_file'] = original_filenames[idx]
+            else:
+                r['source_file'] = original_name
+
+        # Upload each source image to the shared Drive folder (while the
+        # temp files still exist, before the finally block deletes them)
+        # and attach a clickable link to each result so the Sheet can link
+        # straight to the actual uploaded photo.
+        drive_links = {}
+        for i, p in enumerate(image_paths):
+            name = original_filenames[i] if i < len(original_filenames) else os.path.basename(p)
+            drive_links[i] = upload_file(p, display_name=name)
+        for r in results:
+            idx = r.get('first_seen_seconds')
+            if isinstance(idx, int) and idx in drive_links:
+                r['source_link'] = drive_links[idx]
 
         out_name = f'{job_id}.xlsx'
         out_path = os.path.join(OUTPUT_DIR, out_name)
@@ -123,6 +148,15 @@ def process_job(job_id, video_path, original_name, city, garage, auditor, audit_
             JOBS[job_id]['progress'] = pct
 
         results = process_video(video_path, sample_fps=2, progress_cb=progress_cb)
+
+        # Upload the source video to the shared Drive folder (while the
+        # temp file still exists, before the finally block deletes it) and
+        # attach the link to every result row for this job.
+        drive_link = upload_file(video_path, display_name=original_name)
+        for r in results:
+            r['source_file'] = original_name
+            if drive_link:
+                r['source_link'] = drive_link
 
         out_name = f'{job_id}.xlsx'
         out_path = os.path.join(OUTPUT_DIR, out_name)
@@ -205,6 +239,7 @@ def upload():
 
     else:
         saved_paths = []
+        original_filenames = []
         for i, f in enumerate(image_files):
             ext = os.path.splitext(f.filename)[1].lower()
             if ext not in ALLOWED_IMAGE_EXT:
@@ -212,6 +247,7 @@ def upload():
             saved_path = os.path.join(UPLOAD_DIR, f'{job_id}_{i}{ext}')
             f.save(saved_path)
             saved_paths.append(saved_path)
+            original_filenames.append(f.filename)
 
         display_name = f'{len(saved_paths)} photos'
         JOBS[job_id] = {
@@ -219,7 +255,7 @@ def upload():
             'result_file': None, 'video_name': display_name, 'count': 0,
         }
         thread = threading.Thread(target=process_image_job,
-                                   args=(job_id, saved_paths, display_name, city, garage, auditor, audit_date),
+                                   args=(job_id, saved_paths, original_filenames, display_name, city, garage, auditor, audit_date),
                                    daemon=True)
         thread.start()
         return jsonify({'job_id': job_id})
